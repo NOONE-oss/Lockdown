@@ -1,0 +1,30 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('api', {
+  getData: () => ipcRenderer.invoke('get-data'),
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  getUpdateStatus: () => ipcRenderer.invoke('get-update-status'),
+  setAutomaticUpdates: (enabled) => ipcRenderer.invoke('set-automatic-updates', enabled),
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  downloadUpdate: () => ipcRenderer.invoke('download-update'),
+  installUpdate: () => ipcRenderer.invoke('install-update'),
+  onUpdateStatus: (callback) => ipcRenderer.on('update-status', (_event, status) => callback(status)),
+  updateSites: (sites) => ipcRenderer.invoke('update-sites', sites),
+  updateAllowedSites: (sites) => ipcRenderer.invoke('update-allowed-sites', sites),
+  updateApps: (apps) => ipcRenderer.invoke('update-apps', apps),
+  startLock: (minutes) => ipcRenderer.invoke('start-lock', { minutes }),
+  getLockStatus: () => ipcRenderer.invoke('get-lock-status'),
+  getSchedules: () => ipcRenderer.invoke('get-schedules'),
+  saveSchedule: (schedule) => ipcRenderer.invoke('save-schedule', schedule),
+  deleteSchedule: (id) => ipcRenderer.invoke('delete-schedule', id),
+  temporaryUnblock: (minutes, sites, apps) => ipcRenderer.invoke('temporary-unblock', { minutes, sites, apps }),
+  clearTemporaryUnblock: () => ipcRenderer.invoke('clear-temporary-unblock'),
+  remoteCommand: (host, password, command, payload, role) => ipcRenderer.invoke('remote-command', { host, password, command, payload, role }),
+  discoverNetwork: () => ipcRenderer.invoke('discover-network'),
+  networkSpeedTest: () => ipcRenderer.invoke('network-speed-test'),
+  onNetworkSpeedStage: (callback) => ipcRenderer.on('network-speed-stage', (_event, stage) => callback(stage)),
+  getNetworkGroups: () => ipcRenderer.invoke('get-network-groups'),
+  saveNetworkGroup: (group) => ipcRenderer.invoke('save-network-group', group),
+  deleteNetworkGroup: (groupId) => ipcRenderer.invoke('delete-network-group', groupId),
+  onNetworkGroupsUpdated: (callback) => ipcRenderer.on('network-groups-updated', () => callback())
+});

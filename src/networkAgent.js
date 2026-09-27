@@ -1,0 +1,199 @@
+const https = require('https');
+const crypto = require('crypto');
+const os = require('os');
+const fs = require('fs');
+const path = require('path');
+const selfsigned = require('selfsigned');
+const { execFile } = require('child_process');
+
+const DEFAULT_PORT = 47821;
+const SHUTDOWN_RESPONSE_DELAY_MS = 1500;
+const REQUEST_CLOCK_SKEW_MS = 2 * 60 * 1000;
+const REQUEST_ID_TTL_MS = 2 * 60 * 1000;
+let server;
+const pendingNonces = new Set();
+const usedRequestIds = new Map();
+
+async function loadCertificate(certificateDirectory) {
+  const directory = certificateDirectory || path.join(process.cwd(), '.lockdown-cert');
+  const keyPath = path.join(directory, 'agent.key');
+  const certPath = path.join(directory, 'agent.crt');
+  if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
+    return { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) };
+  }
+  fs.mkdirSync(directory, { recursive: true });
+  const generated = await selfsigned.generate([{ name: 'commonName', value: 'Lockdown Blocker Agent' }], {
+    keySize: 2048,
+    days: 3650,
+    algorithm: 'sha256'
+  });
+  fs.writeFileSync(keyPath, generated.private);
+  fs.writeFileSync(certPath, generated.cert);
+  return { key: generated.private, cert: generated.cert };
+}
+
+function hashPassword(password) {
+  if (typeof password !== 'string' || password.length < 12) return null;
+  return `scrypt:${crypto.scryptSync(password, 'lockdown-agent-v1', 32).toString('hex')}`;
+}
+
+function canonicalRequest({ nonce, timestamp, requestId, command, payload, role }) {
+  return JSON.stringify([nonce, timestamp, requestId, command, payload, role]);
+}
+
+function createRequestProof(passwordHash, request) {
+  return crypto.createHmac('sha256', passwordHash || 'no-password').update(canonicalRequest(request)).digest('hex');
+}
+
+function remoteAddress(request) {
+  return String(request.socket?.remoteAddress || 'unknown').replace(/^::ffff:/, '');
+}
+
+function rememberRequestId(requestId) {
+  const now = Date.now();
+  for (const [id, expiresAt] of usedRequestIds) {
+    if (expiresAt <= now) usedRequestIds.delete(id);
+  }
+  if (usedRequestIds.has(requestId)) return false;
+  usedRequestIds.set(requestId, now + REQUEST_ID_TTL_MS);
+  return true;
+}
+
+function sendJson(response, statusCode, body) {
+  response.writeHead(statusCode, { 'Content-Type': 'application/json' });
+  response.end(JSON.stringify(body));
+}
+
+function publicLock(lock) {
+  if (!lock) return null;
+  return { active: Boolean(lock.active), unlockAt: lock.unlockAt || null };
+}
+
+function readBody(request) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    request.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > 1024 * 1024) request.destroy();
+    });
+    request.on('end', () => {
+      try { resolve(body ? JSON.parse(body) : {}); } catch (error) { reject(error); }
+    });
+    request.on('error', reject);
+  });
+}
+
+function runShutdown() {
+  return new Promise((resolve, reject) => {
+    const systemRoot = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
+    const shutdownPath = path.join(systemRoot, 'System32', 'shutdown.exe');
+    execFile(shutdownPath, ['/s', '/f', '/t', '5'], { windowsHide: true }, (error, stdout, stderr) => {
+      if (!error) {
+        resolve({ scheduled: true, delaySeconds: 5 });
+        return;
+      }
+      const detail = String(stderr || stdout || error.message || '').trim();
+      reject(new Error(detail || `Windows shutdown failed with code ${error.code || 'unknown'}.`));
+    });
+  });
+}
+
+async function startNetworkAgent({ getData, getNetworkGroups, updateSites, updateApps, startLock, getActivity, mergeNetworkGroup, recordActivity, certificateDirectory, port = DEFAULT_PORT } = {}) {
+  stopNetworkAgent();
+  const certificate = await loadCertificate(certificateDirectory);
+  server = https.createServer(certificate, async (request, response) => {
+    if (request.method === 'GET' && request.url === '/health') {
+      sendJson(response, 200, { ok: true, name: 'Lockdown Blocker Agent' });
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/challenge') {
+      const nonce = crypto.randomBytes(32).toString('hex');
+      pendingNonces.add(nonce);
+      setTimeout(() => pendingNonces.delete(nonce), 30000);
+      sendJson(response, 200, { nonce });
+      return;
+    }
+
+    if (request.method !== 'POST' || request.url !== '/command') {
+      sendJson(response, 404, { error: 'Not found' });
+      return;
+    }
+
+    try {
+      const body = await readBody(request);
+      const address = remoteAddress(request);
+
+      const timestamp = Number(body.timestamp);
+      const validTimestamp = Number.isSafeInteger(timestamp) && Math.abs(Date.now() - timestamp) <= REQUEST_CLOCK_SKEW_MS;
+      const validRequestId = typeof body.requestId === 'string' && body.requestId.length >= 16 && body.requestId.length <= 100;
+      const validNonce = pendingNonces.has(body.nonce);
+      const validRequest = validTimestamp && validRequestId && rememberRequestId(body.requestId);
+      if (!validNonce || !validRequest) {
+        if (recordActivity) recordActivity('Agent request rejected', address);
+        sendJson(response, 401, { error: 'Request validation failed' });
+        return;
+      }
+      pendingNonces.delete(body.nonce);
+
+      if (body.command === 'shutdown') {
+        sendJson(response, 202, { ok: true, data: { scheduled: true, delaySeconds: 5 } });
+        response.once('finish', () => {
+          setTimeout(() => {
+            runShutdown().catch((error) => {
+              if (recordActivity) recordActivity(`Shutdown failed: ${error.message}`);
+            });
+          }, SHUTDOWN_RESPONSE_DELAY_MS).unref();
+        });
+        return;
+      }
+
+      let result;
+      if (body.command === 'get-data') {
+        const data = getData();
+        result = { blockedSites: data.blockedSites, blockedApps: data.blockedApps, lock: publicLock(data.lock) };
+      }
+      else if (body.command === 'get-network-groups') result = getNetworkGroups ? getNetworkGroups() : [];
+      else if (body.command === 'update-sites') result = updateSites(body.payload || []);
+      else if (body.command === 'update-apps') result = updateApps(body.payload || []);
+      else if (body.command === 'start-lock') {
+        const payload = body.payload || {};
+        result = startLock(payload.minutes, payload.password);
+      }
+      else if (body.command === 'merge-network-group') result = mergeNetworkGroup(body.payload || {});
+      else if (body.command === 'get-status') result = { online: true, hostname: os.hostname(), platform: process.platform, lock: publicLock(getData().lock) };
+      else if (body.command === 'get-activity') result = { hostname: os.hostname(), entries: getActivity ? getActivity() : [] };
+      else {
+        sendJson(response, 400, { error: 'Unknown command' });
+        return;
+      }
+      sendJson(response, 200, { ok: true, data: result });
+    } catch (error) {
+      sendJson(response, 500, { error: error.message });
+    }
+  });
+  await new Promise((resolve, reject) => {
+    server.once('listening', resolve);
+    server.once('error', reject);
+    server.listen(port, '0.0.0.0');
+  }).catch((error) => {
+    server = null;
+    throw new Error(`Network agent could not listen on port ${port}: ${error.message}`);
+  });
+  return port;
+}
+
+function stopNetworkAgent() {
+  if (server) server.close();
+  server = null;
+}
+
+module.exports = {
+  startNetworkAgent,
+  stopNetworkAgent,
+  hashPassword,
+  canonicalRequest,
+  createRequestProof,
+  loadCertificate,
+  DEFAULT_PORT
+};

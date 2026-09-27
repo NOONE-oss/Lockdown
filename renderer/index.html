@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Lockdown Blocker</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark"><img src="spacecraft.svg" alt="Lockdown spacecraft" /></div>
+        <div>
+          <strong>Lockdown</strong>
+          <span>Focus protection</span>
+        </div>
+      </div>
+
+      <nav class="side-nav" aria-label="Main navigation">
+        <a class="nav-item active" href="#overview"><span class="nav-icon">◈</span>Dashboard</a>
+        <a class="nav-item" href="#network"><span class="nav-icon">⌁</span>Network</a>
+        <a class="nav-item" href="#devices"><span class="nav-icon">▣</span>Devices</a>
+        <a class="nav-item" href="#about"><span class="nav-icon">i</span>About</a>
+      </nav>
+
+      <div class="sidebar-note">
+        <div class="about-sidebar-header">
+          <span class="eyebrow">About</span>
+          <span class="mini-badge" id="app-version-sidebar">v--</span>
+        </div>
+        <h3>Lockdown Blocker</h3>
+      </div>
+    </aside>
+
+    <div class="content-shell">
+      <header class="topbar" id="overview" data-tab-section="overview">
+        <div>
+          <span class="eyebrow">Control center</span>
+          <h1>Dashboard</h1>
+          <p class="subtitle">A live view of protection, network health, and connected devices.</p>
+        </div>
+        <div class="header-actions">
+          <label class="theme-switch" for="theme-toggle-sidebar" aria-label="Toggle dark mode">
+            <input id="theme-toggle-sidebar" type="checkbox" />
+            <span class="switch-slider"></span>
+            <span class="switch-label" id="theme-toggle-label">Dark mode</span>
+          </label>
+          <div class="header-status"><span class="status-dot"></span><span>Protection online</span></div>
+        </div>
+      </header>
+
+      <div id="lock-banner" class="lock-banner hidden" data-tab-section="overview"></div>
+
+      <main>
+        <section class="summary-grid" aria-label="Blocking summary" data-tab-section="overview">
+          <div class="summary-card accent-blue"><span class="summary-label">Websites blocked</span><strong id="sites-count">0</strong><span>on this device</span></div>
+          <div class="summary-card accent-orange"><span class="summary-label">Apps blocked</span><strong id="apps-count">0</strong><span>on this device</span></div>
+          <div class="summary-card accent-green"><span class="summary-label">Protection</span><strong id="protection-state">Ready</strong><span id="protection-detail">No active lock</span></div>
+        </section>
+
+        <section class="dashboard-grid" data-tab-section="overview" aria-label="Network overview">
+          <div class="panel usage-panel">
+            <div class="panel-heading"><div class="panel-icon blue">⌁</div><div><h3>Network usage</h3><p>Recent connection activity from speed tests.</p></div><strong id="usage-current" class="usage-current">-- Mbps</strong></div>
+            <div class="usage-chart-wrap"><canvas id="usage-chart" width="720" height="190" aria-label="Network usage graph"></canvas><div id="usage-empty" class="chart-empty">Run a speed test to build your usage graph.</div></div>
+            <div class="chart-legend"><span><i class="legend-download"></i>Download</span><span><i class="legend-upload"></i>Upload</span><span id="usage-updated">No readings yet</span></div>
+          </div>
+          <div class="panel status-panel">
+            <div class="panel-heading"><div class="panel-icon green">●</div><div><h3>Device status</h3><p>Online devices discovered on your network.</p></div></div>
+            <div class="status-counts"><div><strong id="dashboard-online">0</strong><span>Online</span></div><div><strong id="dashboard-offline">0</strong><span>Offline</span></div></div>
+            <div id="dashboard-device-list" class="dashboard-device-list"><span class="chart-empty">Scan Network to see devices here.</span></div>
+            <button class="secondary-button dashboard-link" data-go-tab="network">Open Network</button>
+          </div>
+        </section>
+
+        <section class="panel about-panel" data-tab-section="about" aria-label="About Lockdown Blocker">
+          <div class="panel-heading about-heading">
+            <div class="panel-icon blue">i</div>
+            <div>
+              <span class="eyebrow">About</span>
+              <h3>Lockdown Blocker</h3>
+            </div>
+          </div>
+          <p class="about-description">Lockdown Blocker is a Windows focus-control app designed to block distracting websites and applications, enforce timed locks, and help manage remote computers on the same local network.</p>
+          <div class="about-metrics">
+            <div><span>Current version</span><strong id="app-version-about">v--</strong></div>
+            <div><span>Update status</span><strong id="about-update-status">Ready</strong></div>
+          </div>
+          <div class="about-actions">
+            <button id="check-updates-about" class="secondary-button">Check for updates</button>
+            <label class="update-toggle"><input id="automatic-updates-about" type="checkbox" checked /> Automatic updates</label>
+          </div>
+        </section>
+
+        <div class="section-heading" id="websites" data-tab-section="devices" data-device-step="local">
+          <div><span class="eyebrow">Block list</span><h2>Websites</h2></div>
+          <span class="scope-tag">This device</span>
+        </div>
+        <section class="panel list-panel" data-tab-section="devices" data-device-step="local">
+          <div class="panel-heading"><div class="panel-icon blue">◎</div><div><h3>Distracting websites</h3><p>One domain per line. Subdomains are covered automatically.</p></div></div>
+          <textarea id="sites-input" rows="7" tabindex="0" spellcheck="false" placeholder="youtube.com&#10;facebook.com&#10;reddit.com" aria-label="Blocked websites"></textarea>
+          <div class="allowed-sites-box"><label>Always allow these websites<textarea id="allowed-sites-input" rows="3" tabindex="0" spellcheck="false" placeholder="docs.google.com&#10;classroom.google.com" aria-label="Allowed websites"></textarea></label><span class="field-note">Allowed entries override the blocked list.</span></div>
+          <div class="panel-footer"><span class="field-note">One domain per line. Changes apply after saving.</span><button id="save-sites"><span>Save website rules</span><span class="button-arrow">→</span></button></div>
+        </section>
+
+        <div class="section-heading" id="apps" data-tab-section="devices" data-device-step="local">
+          <div><span class="eyebrow">Block list</span><h2>Applications</h2></div>
+          <span class="scope-tag">This device</span>
+        </div>
+        <section class="panel list-panel" data-tab-section="devices" data-device-step="local">
+          <div class="panel-heading"><div class="panel-icon orange">▦</div><div><h3>Distracting applications</h3><p>Use the process name, such as <code>steam.exe</code>.</p></div></div>
+          <textarea id="apps-input" rows="7" tabindex="0" spellcheck="false" placeholder="steam.exe&#10;discord.exe&#10;spotify.exe" aria-label="Blocked applications"></textarea>
+          <div class="panel-footer"><span class="field-note">Running matches will be closed automatically.</span><button id="save-apps"><span>Save list</span><span class="button-arrow">→</span></button></div>
+        </section>
+
+        <div class="section-heading" id="focus" data-tab-section="devices" data-device-step="local">
+          <div><span class="eyebrow">Protection schedule</span><h2>Lock timer</h2></div>
+        </div>
+        <section class="panel timer-panel" data-tab-section="devices" data-device-step="local">
+          <div class="timer-copy"><div class="panel-icon green">◷</div><div><h3>Commit to a focused session</h3><p>Blocking stays active until the timer ends. Your lists remain editable.</p></div></div>
+          <div class="timer-form">
+            <label>Duration (minutes)<input id="lock-minutes" type="number" value="60" min="1" /></label>
+            <button id="start-lock" class="primary-action"><span>Start focus session</span><span class="button-arrow">→</span></button>
+          </div>
+          <label class="gaming-toggle"><input id="gaming-mode" type="checkbox" /> Block gaming apps</label>
+          <p id="lock-status" class="lock-status"></p>
+          <div class="temporary-unblock-box">
+            <h3>Temporary unblock</h3>
+            <p>Pause selected website and application rules for a short period.</p>
+            <div class="temporary-unblock-form"><label>Minutes<input id="temporary-unblock-minutes" type="number" min="1" max="1440" value="15" /></label><button id="temporary-unblock" class="secondary-button">Pause rules</button><button id="clear-temporary-unblock" class="secondary-button">Restore now</button></div>
+          </div>
+          <div class="schedule-box">
+            <h3>Scheduled restrictions</h3>
+            <p>Start a focus lock automatically on selected days.</p>
+            <div class="schedule-form"><label>Name<input id="schedule-name" type="text" placeholder="Study time" maxlength="50" /></label><label>Start<input id="schedule-start" type="time" value="09:00" /></label><label>End<input id="schedule-end" type="time" value="10:00" /></label><button id="save-schedule" class="primary-action">Add schedule</button></div>
+            <div class="schedule-days" role="group" aria-label="Schedule days"><label><input type="checkbox" value="1" checked /> Mon</label><label><input type="checkbox" value="2" checked /> Tue</label><label><input type="checkbox" value="3" checked /> Wed</label><label><input type="checkbox" value="4" checked /> Thu</label><label><input type="checkbox" value="5" checked /> Fri</label><label><input type="checkbox" value="6" /> Sat</label><label><input type="checkbox" value="0" /> Sun</label></div>
+            <div id="schedule-list" class="schedule-list"><span class="field-note">No schedules configured.</span></div>
+          </div>
+        </section>
+
+        <div class="section-heading" data-tab-section="network">
+          <div><span class="eyebrow">Local network</span><h2>Devices & groups</h2></div>
+          <span id="device-count" class="scope-tag">0 devices found</span>
+        </div>
+        <section class="panel devices-panel" data-tab-section="network">
+          <div class="devices-toolbar">
+            <div><h3>Choose computers to control</h3><p>Devices are discovered from your Windows network table. The agent must be installed on a device before commands can reach it.</p></div>
+            <button id="scan-network" class="connect-button"><span>Scan network</span><span class="button-arrow">↻</span></button>
+          </div>
+          <div id="device-list" class="device-list"><div class="empty-devices">Scan your network to find computers.</div></div>
+          <div class="group-toolbar">
+            <label>Save selected devices to<select id="device-group-select" aria-label="Group for selected devices"><option value="">Choose a group</option></select></label>
+            <button id="assign-devices" class="connect-button">Save selected devices</button>
+          </div>
+          <div class="group-actions"><span id="group-status">Select devices, then choose a group to save them.</span></div>
+        </section>
+
+        <section id="saved-pcs" class="saved-pcs-view" data-tab-section="devices">
+          <div class="device-flow-nav" aria-label="Device workflow"><span class="flow-label">Computer lab controls</span><button id="device-step-groups" class="flow-step active"><b>1</b> Choose group</button><button id="device-step-devices" class="flow-step"><b>2</b> Select PCs</button><button id="device-step-local" class="flow-step"><b>3</b> Manage rules</button><button id="device-step-rules" class="flow-step"><b>↗</b> Open rules</button></div>
+          <div class="section-heading" data-device-step="groups"><div><button id="add-group" class="primary-action">+ Add Group</button><span class="eyebrow">Computer lab groups</span><h2>Choose a group</h2></div><div class="saved-pc-heading-actions"><button id="sync-saved-pcs" class="connect-button" type="button" title="Discover saved PCs, update changed IP addresses, and check their agents"><span>Sync PCs</span><span class="button-arrow">↻</span></button><button id="refresh-saved-pcs" class="secondary-button" type="button" title="Check which saved PCs are online"><span>Refresh</span><span class="button-arrow">↻</span></button><span id="saved-pc-count" class="scope-tag">0 groups</span></div></div>
+          <div id="group-list" class="group-directory" data-device-step="groups"></div>
+          <div id="group-devices-header" class="group-devices-header hidden" data-device-step="devices"><button id="back-to-groups" class="secondary-button">← Back to Groups</button><div><span class="eyebrow">Selected group</span><h2 id="active-group-name">Group devices</h2></div><span id="active-group-count" class="scope-tag">0 devices</span></div>
+          <div class="bulk-panel" data-device-step="devices">
+            <div><h3>Control selected PCs</h3><p id="group-selection-help">Open a group, select one or more PCs, then choose an action.</p></div>
+            <label class="select-all-control"><input id="select-all-saved" type="checkbox"> Select all PCs</label>
+            <div class="group-action-buttons"><button id="focus-selected" class="secondary-button">Start focus lock</button><button id="block-websites-selected">Block websites</button><button id="block-apps-selected">Block applications</button><button id="shutdown-selected" class="danger-button">Shut down selected</button></div>
+            <p class="lab-rule-note">Website and application actions use the lists configured in <button id="open-local-rules" type="button">Manage rules</button>.</p>
+          </div>
+          <div id="saved-pc-cards" class="saved-pc-cards" data-device-step="devices"><div class="empty-devices">Save a group to see its PCs here.</div></div>
+        </section>
+
+        <section class="speed-panel" data-tab-section="overview">
+          <div class="network-icon">⌁</div>
+          <div class="speed-copy"><span class="eyebrow">Connection check</span><h3>Internet speed</h3><p>Measure this computer's current connection. This is separate from LAN device discovery.</p></div>
+          <div class="speed-results"><div><strong id="speed-download">--</strong><span>Mbps download</span></div><div><strong id="speed-latency">--</strong><span>ms latency</span></div></div>
+          <button id="speed-test" class="connect-button"><span>Run speed test</span><span class="button-arrow">→</span></button>
+        </section>
+
+        <section class="speed-view" id="speed-view" data-tab-section="overview">
+          <div class="section-heading speed-heading"><div><span class="eyebrow">Connection telemetry / instrument cluster</span><h2>Internet speed test</h2></div><span id="speed-live-state" class="scope-tag">CONNECTED</span></div>
+          <div class="speed-cluster">
+            <div class="speedometer">
+              <div class="dial-glow"></div><div class="dial-ticks" id="dial-ticks"></div>
+              <div class="dial-arc"></div><div id="governor-pointer" class="governor-pointer"><span></span></div><div class="pointer-hub"></div>
+              <div class="dial-label dial-0">0</div><div class="dial-label dial-100">100</div><div class="dial-label dial-200">200</div><div class="dial-label dial-300">300</div><div class="dial-label dial-400">400</div><div class="dial-label dial-500">500</div><div class="dial-label dial-600">600</div><div class="dial-label dial-700">700</div><div class="dial-label dial-800">800</div><div class="dial-label dial-900">900</div><div class="dial-label dial-1000">1000</div>
+              <div class="dial-center"><span id="governor-phase">READY</span><strong id="governor-value">0</strong><small>Mbps</small></div>
+            </div>
+            <div class="cluster-side">
+              <div class="cluster-state"><span class="status-dot"></span><span id="governor-title">Ready to test your connection</span><small id="governor-message">Precision connection telemetry</small></div>
+              <div class="cluster-stats"><div><span>DOWNLOAD</span><strong id="governor-download">-- Mbps</strong></div><div><span>UPLOAD</span><strong id="governor-upload">-- Mbps</strong></div><div><span>PING</span><strong id="governor-latency">-- ms</strong></div><div><span>JITTER</span><strong id="governor-jitter">4 ms</strong></div><div><span>PACKET LOSS</span><strong id="governor-loss">0.2%</strong></div><div><span>SERVER</span><strong>Nairobi</strong></div></div>
+              <div class="test-progress"><span id="progress-label">READY TO TEST</span><div><i id="progress-bar"></i></div></div>
+              <button id="governor-test" class="primary-action speed-start"><span>START SPEED TEST</span><span class="button-arrow">→</span></button>
+              <small id="governor-time" class="last-checked">No test run yet</small>
+            </div>
+          </div>
+          <div class="network-summary"><div class="summary-title"><span class="eyebrow">Network information</span><strong>MOHI-LAB</strong></div><div><span>PUBLIC IP</span><strong>Detecting...</strong></div><div><span>ISP</span><strong>Starlink</strong></div><div><span>SERVER</span><strong>Nairobi, Kenya</strong></div><div><span>CONNECTION</span><strong class="connected-text"><i></i>Connected</strong></div></div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="group-dialog" class="password-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="group-dialog-title">
+    <div class="password-dialog-panel group-dialog-panel">
+      <h2 id="group-dialog-title">Add group</h2>
+      <p>Create a group here, then add devices from Network scope.</p>
+      <label class="dialog-field">Group name<input id="group-name" type="text" placeholder="Study computers" maxlength="50" /></label>
+      <select id="group-select" class="dialog-select" aria-label="Saved device group"><option value="">Choose a saved group</option></select>
+      <div class="password-dialog-actions"><button id="delete-group" class="danger-button">Delete</button><button id="load-group" class="secondary-button">Edit name</button><button id="group-dialog-cancel" class="secondary-button">Cancel</button><button id="save-group" class="primary-action">Add group</button></div>
+    </div>
+  </div>
+  <script src="renderer.js"></script>
+</body>
+</html>
