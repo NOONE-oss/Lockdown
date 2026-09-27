@@ -14,7 +14,7 @@ const networkDiscovery = require('./src/networkDiscovery');
 const networkSpeedTest = require('./src/networkSpeedTest');
 const windowsPermissions = require('./src/windowsPermissions');
 const scheduleManager = require('./src/scheduleManager');
-const { normalizeList, normalizeDuration } = require('./src/inputValidation');
+const { normalizeList, normalizeDuration, normalizeIpList } = require('./src/inputValidation');
 
 const appIcon = path.join(__dirname, 'renderer', 'spacecraft.png');
 const isBackgroundAgent = process.argv.includes('--background-agent');
@@ -71,9 +71,12 @@ function configureWindowsStartup() {
   }
 }
 
-async function remoteCommand(host, password, command, payload, role = 'operator') {
+// Shared HTTPS client used for every remote agent call (legacy password
+// path, signed path, and enrollment). Centralizing this means the
+// certificate-pinning logic only exists once.
+function createRemoteClient(host) {
   const address = host.replace(/^https?:\/\//, '').replace(/\/$/, '');
-  const requestJson = (method, route, body) => new Promise((resolve, reject) => {
+  return (method, route, body) => new Promise((resolve, reject) => {
     const request = https.request({
       hostname: address.split(':')[0],
       port: address.split(':')[1] || 47821,
@@ -106,6 +109,20 @@ async function remoteCommand(host, password, command, payload, role = 'operator'
     if (body) request.write(JSON.stringify(body));
     request.end();
   });
+}
+
+async function remoteCommand(host, password, command, payload, role = 'operator') {
+  // The password never travels over the network. It is hashed locally, and
+  // that hash is used as an HMAC key to sign this specific request (see
+  // networkAgent.createRequestProof). The remote agent independently
+  // recomputes the same proof from its own stored password hash and
+  // compares them — so a wrong password produces a proof mismatch, not a
+  // transmitted secret an eavesdropper could reuse.
+  const passwordHash = networkAgent.hashPassword(password);
+  if (!passwordHash) {
+    throw new Error('The network password must be at least 12 characters.');
+  }
+  const requestJson = createRemoteClient(host);
 
   const challengeResponse = await requestJson('GET', '/challenge');
   if (challengeResponse.status !== 200) throw new Error('Could not reach that device. Check its IP and firewall.');
@@ -118,9 +135,74 @@ async function remoteCommand(host, password, command, payload, role = 'operator'
     payload: payload === undefined ? null : payload,
     role
   };
+  request.proof = networkAgent.createRequestProof(passwordHash, request);
   const response = await requestJson('POST', '/command', request);
   if (response.status < 200 || response.status >= 300) throw new Error(response.body.error || 'Remote command failed.');
   return response.body.data;
+}
+
+// This PC's identity when it acts as a controller. Generated once and
+// reused — the private key never leaves this function's callers (main.js
+// only), and is never sent over the network; only the public key is, and
+// only during enrollment.
+function getOrCreateControllerIdentity() {
+  const data = store.load();
+  if (data.controllerIdentity?.id && data.controllerIdentity?.privateKey) return data.controllerIdentity;
+  const identity = networkAgent.generateControllerIdentity();
+  data.controllerIdentity = identity;
+  store.save(data);
+  return identity;
+}
+
+// Signed path (Step 2): used once this PC has been enrolled on the target.
+// No password involved at all — authentication is the Ed25519 signature,
+// and the role is whatever the target's admin assigned at enrollment.
+async function remoteCommandSigned(host, command, payload) {
+  const identity = getOrCreateControllerIdentity();
+  const requestJson = createRemoteClient(host);
+
+  const challengeResponse = await requestJson('GET', '/challenge');
+  if (challengeResponse.status !== 200) throw new Error('Could not reach that device. Check its IP and firewall.');
+  const { nonce } = challengeResponse.body;
+  const request = {
+    nonce,
+    timestamp: Date.now(),
+    requestId: crypto.randomUUID(),
+    command,
+    payload: payload === undefined ? null : payload,
+    controllerId: identity.id
+  };
+  request.signature = networkAgent.signRequest(identity.privateKey, request);
+  const response = await requestJson('POST', '/command', request);
+  if (response.status < 200 || response.status >= 300) throw new Error(response.body.error || 'Remote command failed.');
+  return response.body.data;
+}
+
+// Enrolls THIS PC as a controller on the target device, using a pairing
+// code an admin generated locally at the target. Role is decided by
+// whoever is standing at the target PC approving the enrollment, not by
+// this (the controller) side.
+async function enrollWithController(host, code, label, role) {
+  const identity = getOrCreateControllerIdentity();
+  const requestJson = createRemoteClient(host);
+  const response = await requestJson('POST', '/enroll', {
+    code,
+    controllerId: identity.id,
+    controllerPublicKey: identity.publicKey,
+    label: label || require('os').hostname(),
+    role: role || 'operator'
+  });
+  if (response.status < 200 || response.status >= 300) throw new Error(response.body.error || 'Enrollment failed.');
+  return response.body.data;
+}
+
+// Applies a patch to this PC's own network-security fields (called by the
+// agent server itself when handling an incoming /enroll request).
+function updateNetworkSecurity(patch) {
+  const data = store.load();
+  data.network = { ...data.network, ...patch };
+  store.save(data);
+  return data.network;
 }
 
 function createWindow() {
@@ -422,11 +504,12 @@ app.whenReady().then(() => {
       getActivity,
       mergeNetworkGroup,
       recordActivity,
+      updateNetworkSecurity,
       certificateDirectory: path.join(store.DATA_DIR, 'agent-certificate'),
       port: data.network?.port || networkAgent.DEFAULT_PORT
     }).catch((error) => console.error('Network agent failed to start:', error.message));
-    windowsPermissions.ensurePrivateNetworkAccess(data.network?.port || networkAgent.DEFAULT_PORT)
-      .then((result) => console.log(result.created ? 'Private network firewall rule created.' : 'Private network firewall rule ready.'))
+    windowsPermissions.ensurePrivateNetworkAccess(data.network?.port || networkAgent.DEFAULT_PORT, data.network?.allowedControllerIps || [])
+      .then((result) => console.log(result.created ? `Private network firewall rule created (remoteip=${result.remoteIp}).` : 'Private network firewall rule ready.'))
       .catch((error) => console.error('Private network firewall rule unavailable:', error.message));
   }
   if (!isBackgroundAgent) {
@@ -559,6 +642,111 @@ ipcMain.handle('network-speed-test', (event) => networkSpeedTest.measureNetworkS
 }));
 
 ipcMain.handle('get-network-groups', () => store.load().network?.groups || []);
+
+// This sets the password THIS PC's agent expects from a controller. The
+// same password must be set on every PC in the lab for the shared-password
+// model to work; it is stored only as a scrypt hash, never in plain text.
+ipcMain.handle('set-agent-password', (_evt, password) => {
+  const hash = networkAgent.hashPassword(password);
+  if (!hash) throw new Error('Network password must be at least 12 characters.');
+  const data = store.load();
+  data.network = data.network || {};
+  data.network.passwordHash = hash;
+  store.save(data);
+  recordActivity('Agent password changed', 'Local device');
+  return { configured: true };
+});
+
+ipcMain.handle('get-agent-security-status', () => {
+  const data = store.load();
+  return {
+    passwordConfigured: Boolean(data.network?.passwordHash),
+    allowedControllerIps: data.network?.allowedControllerIps || [],
+    allowLegacyPassword: data.network?.allowLegacyPassword !== false,
+    enrolledControllerCount: (data.network?.enrolledControllers || []).length
+  };
+});
+
+// This PC's own identity when it acts as a controller. Only the id and
+// public key ever go to the renderer or over the network — the private
+// key stays in the store file and this process.
+ipcMain.handle('get-controller-identity', () => {
+  const identity = getOrCreateControllerIdentity();
+  return { id: identity.id, publicKey: identity.publicKey };
+});
+
+// Generates a pairing code on THIS PC (the target being enrolled onto).
+// Must be triggered by someone at this machine's own app — it is never
+// reachable as a network command.
+ipcMain.handle('generate-pairing-code', () => networkAgent.startPairing());
+
+ipcMain.handle('get-pairing-status', () => networkAgent.pairingStatus());
+
+ipcMain.handle('cancel-pairing', () => {
+  networkAgent.clearPairing();
+  return { active: false };
+});
+
+// Controller-side: enroll THIS PC onto a target device using a code shown
+// on that target's own screen.
+ipcMain.handle('enroll-controller', (_evt, { host, code, label, role }) =>
+  enrollWithController(host, code, label, role)
+);
+
+// The signed-request path for a PC that has already been enrolled
+// elsewhere. Renderer call sites can switch to this once enrollment is
+// confirmed working; the legacy remote-command path keeps working
+// alongside it during migration.
+ipcMain.handle('remote-command-signed', (_evt, { host, command, payload }) =>
+  remoteCommandSigned(host, command, payload)
+);
+
+ipcMain.handle('get-enrolled-controllers', () => {
+  const data = store.load();
+  // publicKey is not secret, but there's no reason to ship it to the
+  // renderer for a list view — trim it down to what the UI needs.
+  return (data.network?.enrolledControllers || []).map(({ id, label, role, enrolledAt }) => ({ id, label, role, enrolledAt }));
+});
+
+ipcMain.handle('remove-enrolled-controller', (_evt, id) => {
+  const data = store.load();
+  const before = (data.network?.enrolledControllers || []).length;
+  data.network = data.network || {};
+  data.network.enrolledControllers = (data.network.enrolledControllers || []).filter((c) => c.id !== id);
+  store.save(data);
+  if (data.network.enrolledControllers.length < before) recordActivity('Enrolled controller removed', id);
+  return data.network.enrolledControllers.map(({ id: cid, label, role, enrolledAt }) => ({ id: cid, label, role, enrolledAt }));
+});
+
+// Once every controller that needs access to this PC is enrolled, the
+// shared password can be retired here so a leaked password alone stops
+// being enough to reach this specific device.
+ipcMain.handle('set-allow-legacy-password', (_evt, allowed) => {
+  const data = store.load();
+  data.network = data.network || {};
+  data.network.allowLegacyPassword = Boolean(allowed);
+  store.save(data);
+  recordActivity(allowed ? 'Legacy shared password re-enabled' : 'Legacy shared password disabled', 'Local device');
+  return { allowLegacyPassword: data.network.allowLegacyPassword };
+});
+
+// Controls which IPs the Windows firewall lets reach this PC's agent port
+// at all. An empty list means loopback-only (see windowsPermissions.js) —
+// nothing on the LAN can reach it until at least one controller IP is added.
+ipcMain.handle('update-allowed-controllers', async (_evt, ips) => {
+  const cleaned = normalizeIpList(ips || []);
+  const data = store.load();
+  data.network = data.network || {};
+  data.network.allowedControllerIps = cleaned;
+  store.save(data);
+  recordActivity('Allowed controller list updated', `${cleaned.length} IP${cleaned.length === 1 ? '' : 's'}`);
+  try {
+    const result = await windowsPermissions.ensurePrivateNetworkAccess(data.network?.port || networkAgent.DEFAULT_PORT, cleaned);
+    return { allowedControllerIps: cleaned, firewall: result };
+  } catch (error) {
+    return { allowedControllerIps: cleaned, firewall: { supported: false, error: error.message } };
+  }
+});
 
 ipcMain.handle('delete-network-group', (_evt, groupId) => {
   const data = store.load();
