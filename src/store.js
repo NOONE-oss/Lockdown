@@ -15,6 +15,11 @@ const DEFAULT_DATA = {
   allowedSites: [],      // domains that override the blocked list
   blockedApps: [],       // e.g. ["chrome.exe", "steam.exe"]
   schedules: [],         // [{ id, days: [1,2,3,4,5], start: "09:00", end: "17:00" }]
+  // This PC's own identity when it acts AS a controller sending commands to
+  // others. Generated lazily on first use (main.js), never sent anywhere —
+  // only the public key and its fingerprint (id) ever leave this machine,
+  // during enrollment with a target agent.
+  controllerIdentity: null, // { id, publicKey, privateKey }
   lock: {
     active: false,
     unlockAt: null      // ISO timestamp — cannot be unlocked before this
@@ -22,7 +27,11 @@ const DEFAULT_DATA = {
   network: {
     agentEnabled: true,
     port: 47821,
-    groups: []
+    groups: [],
+    passwordHash: null,          // set via 'Set network password' — same password must be set on every lab PC
+    allowedControllerIps: [],    // IPs allowed through the firewall to reach the agent port; empty = only this PC
+    enrolledControllers: [],     // [{ id, publicKey, label, role, enrolledAt }] — devices approved via pairing code
+    allowLegacyPassword: true    // set to false once every controller talking to this PC is enrolled
   },
   activity: []
 };
@@ -43,7 +52,12 @@ function ensureFile() {
 function load() {
   ensureFile();
   try {
-    return JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
+    const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
+    // Existing installs upgrading from a version before the security fields
+    // existed won't have them in their saved file. Fill them in rather than
+    // treating their absence as "no password configured" being surprising.
+    data.network = { ...DEFAULT_DATA.network, ...(data.network || {}) };
+    return data;
   } catch (err) {
     console.error('Failed to read store, resetting to defaults', err);
     save(DEFAULT_DATA);
@@ -56,4 +70,4 @@ function save(data) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
-module.exports = { load, save, DATA_DIR, DATA_FILE };
+module.exports = { load, save, DATA_DIR, DATA_FILE, LEGACY_DATA_FILE, DEFAULT_DATA };

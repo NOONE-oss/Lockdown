@@ -12,16 +12,23 @@ function run(command, args) {
   });
 }
 
-async function ensurePrivateNetworkAccess(port) {
+// allowedIps: list of controller IPs approved to reach the agent port.
+// Deliberately does NOT default to 'localsubnet' — on a flat lab network,
+// that would let any student PC on the same subnet reach every other PC's
+// agent port. With no controller IPs configured yet, the rule restricts to
+// loopback only, so the agent is reachable locally but not over the LAN
+// until at least one controller is explicitly allowed.
+async function ensurePrivateNetworkAccess(port, allowedIps = []) {
   if (process.platform !== 'win32') return { supported: false };
+  const remoteIp = Array.isArray(allowedIps) && allowedIps.length ? allowedIps.join(',') : '127.0.0.1';
   await run('netsh', ['advfirewall', 'firewall', 'delete', 'rule', `name=${FIREWALL_RULE_NAME}`]).catch(() => {});
   await run('netsh', [
     'advfirewall', 'firewall', 'add', 'rule',
     `name=${FIREWALL_RULE_NAME}`,
     'dir=in', 'action=allow', 'protocol=TCP', `localport=${port}`,
-    'profile=any', 'remoteip=localsubnet', 'enable=yes'
+    'profile=any', `remoteip=${remoteIp}`, 'enable=yes'
   ]);
-  return { supported: true, created: true };
+  return { supported: true, created: true, remoteIp };
 }
 
 async function ensureBootAgent(executablePath) {
