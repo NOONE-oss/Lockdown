@@ -179,13 +179,65 @@ function agentSessionPassword() {
   return null;
 }
 
+// Electron does not implement the browser's built-in prompt box (it silently
+// returns nothing), so password entry uses this in-app dialog instead.
+// Resolves with the typed password, or null if the user cancels. With
+// confirmEntry, the password has to be typed twice and both must match.
+function askForPassword({ title, message, confirmEntry = false, minLength = 12 }) {
+  return new Promise((resolve) => {
+    const dialog = document.getElementById('secret-dialog');
+    const input = document.getElementById('secret-dialog-input');
+    const confirmInput = document.getElementById('secret-dialog-confirm');
+    const confirmRow = document.getElementById('secret-dialog-confirm-row');
+    const errorLine = document.getElementById('secret-dialog-error');
+    const okButton = document.getElementById('secret-dialog-ok');
+    const cancelButton = document.getElementById('secret-dialog-cancel');
+    document.getElementById('secret-dialog-title').textContent = title;
+    document.getElementById('secret-dialog-message').textContent = message;
+    input.value = '';
+    confirmInput.value = '';
+    errorLine.textContent = '';
+    confirmRow.hidden = !confirmEntry;
+    dialog.hidden = false;
+    input.focus();
+
+    const finish = (value) => {
+      dialog.hidden = true;
+      input.value = '';
+      confirmInput.value = '';
+      okButton.removeEventListener('click', onOk);
+      cancelButton.removeEventListener('click', onCancel);
+      dialog.removeEventListener('keydown', onKey);
+      resolve(value);
+    };
+    const onOk = () => {
+      if (input.value.length < minLength) {
+        errorLine.textContent = `Password must be at least ${minLength} characters.`;
+        return;
+      }
+      if (confirmEntry && confirmInput.value !== input.value) {
+        errorLine.textContent = 'The two passwords do not match.';
+        return;
+      }
+      finish(input.value);
+    };
+    const onCancel = () => finish(null);
+    const onKey = (event) => {
+      if (event.key === 'Enter') onOk();
+      if (event.key === 'Escape') onCancel();
+    };
+    okButton.addEventListener('click', onOk);
+    cancelButton.addEventListener('click', onCancel);
+    dialog.addEventListener('keydown', onKey);
+  });
+}
+
 async function unlockAgentSession() {
-  const entered = window.prompt('Enter the shared network password for this lab.\n\nThis is the same password that must be set on every lab PC (Network tab → Set network password).');
+  const entered = await askForPassword({
+    title: 'Network password',
+    message: 'Enter the shared network password for this lab. It is the same password that was set on every lab PC (Network tab > Set network password).'
+  });
   if (entered === null) return false; // user cancelled
-  if (entered.length < 12) {
-    showToast('Network password must be at least 12 characters.');
-    return false;
-  }
   cachedAgentPassword = entered;
   agentSessionExpiresAt = Date.now() + AGENT_SESSION_DURATION_MS;
   updateAgentSessionStatus();
@@ -1254,17 +1306,12 @@ requireEnrolledOnlyCheckbox?.addEventListener('change', async () => {
 });
 
 setAgentPasswordBtn?.addEventListener('click', async () => {
-  const entered = window.prompt('Set the network password for THIS PC.\n\nSet the exact same password on every other lab PC — controllers authenticate with this shared password.');
+  const entered = await askForPassword({
+    title: 'Set network password',
+    message: 'Set the password THIS PC will require from controllers. Use the exact same password on every other lab PC.',
+    confirmEntry: true
+  });
   if (entered === null) return;
-  if (entered.length < 12) {
-    showToast('Network password must be at least 12 characters.');
-    return;
-  }
-  const confirmEntry = window.prompt('Re-enter the password to confirm:');
-  if (confirmEntry !== entered) {
-    showToast('Passwords did not match — nothing was changed.');
-    return;
-  }
   try {
     await window.api.setAgentPassword(entered);
     showToast('Network password set for this PC.');

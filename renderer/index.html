@@ -255,6 +255,16 @@
       <div class="password-dialog-actions"><button id="delete-group" class="danger-button">Delete</button><button id="load-group" class="secondary-button">Edit name</button><button id="group-dialog-cancel" class="secondary-button">Cancel</button><button id="save-group" class="primary-action">Add group</button></div>
     </div>
   </div>
+  <div id="secret-dialog" class="password-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="secret-dialog-title">
+    <div class="password-dialog-panel">
+      <h2 id="secret-dialog-title">Network password</h2>
+      <p id="secret-dialog-message"></p>
+      <label class="dialog-field">Password<input id="secret-dialog-input" type="password" autocomplete="off" spellcheck="false" /></label>
+      <label id="secret-dialog-confirm-row" class="dialog-field" hidden>Confirm password<input id="secret-dialog-confirm" type="password" autocomplete="off" spellcheck="false" /></label>
+      <p id="secret-dialog-error" style="color:#e5484d;min-height:14px;margin:8px 0 0"></p>
+      <div class="password-dialog-actions"><button id="secret-dialog-cancel" class="secondary-button" type="button">Cancel</button><button id="secret-dialog-ok" class="primary-action" type="button">OK</button></div>
+    </div>
+  </div>
   <script src="renderer.js"></script>
 </body>
 </html>
