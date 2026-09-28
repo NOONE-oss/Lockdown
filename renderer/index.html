@@ -154,6 +154,52 @@
           <div class="group-actions"><span id="group-status">Select devices, then choose a group to save them.</span></div>
         </section>
 
+        <section class="panel devices-panel" data-tab-section="network" aria-label="Agent security">
+          <div class="devices-toolbar">
+            <div><h3>Agent security</h3><p>The same network password must be set on this PC and on every other lab PC. Without it, remote commands are rejected. Session: <strong id="agent-session-status">Not authenticated</strong></p></div>
+            <button id="set-agent-password" class="connect-button" type="button"><span>Set network password</span></button>
+          </div>
+          <div class="group-toolbar">
+            <label>Controller IPs allowed to reach this PC (comma or newline separated)<textarea id="allowed-controllers-input" rows="2" placeholder="e.g. 192.168.1.10, 192.168.1.11"></textarea></label>
+            <button id="save-allowed-controllers" class="connect-button" type="button">Save allowed controllers</button>
+          </div>
+          <div class="group-actions"><span id="agent-security-status">No controller IPs allowed yet — this PC's agent is not reachable over the LAN.</span></div>
+        </section>
+
+        <section class="panel devices-panel" data-tab-section="network" aria-label="Controller enrollment">
+          <div class="devices-toolbar">
+            <div><h3>Enrolled controllers</h3><p>Enrollment replaces the shared password for a specific controller PC with its own key, and fixes the role you assign here — it can't be changed by whoever is holding that PC.</p></div>
+          </div>
+
+          <div class="group-toolbar">
+            <div><strong>Step 1 — On this PC (the one being controlled):</strong> generate a one-time pairing code and read it to whoever is at the controller PC.</div>
+            <button id="generate-pairing-code" class="connect-button" type="button">Generate pairing code</button>
+          </div>
+          <div class="group-actions"><span id="pairing-code-display">No pairing code active.</span> <button id="cancel-pairing" class="secondary-button" type="button" hidden>Cancel code</button></div>
+
+          <div class="group-toolbar">
+            <div><strong>Step 2 — On the controller PC:</strong> enter the target PC's address and the code it displayed.</div>
+          </div>
+          <div class="group-toolbar">
+            <label>Target PC address (IP:port)<input id="enroll-host-input" type="text" placeholder="192.168.1.20:47821" /></label>
+            <label>Pairing code<input id="enroll-code-input" type="text" placeholder="e.g. 9KXDYM3ZN3" maxlength="10" /></label>
+          </div>
+          <div class="group-toolbar">
+            <label>Label for this controller<input id="enroll-label-input" type="text" placeholder="e.g. Teacher desk — Lab 1" /></label>
+            <label>Role to grant<select id="enroll-role-input"><option value="viewer">Viewer (read-only)</option><option value="operator" selected>Operator (block lists, locks)</option><option value="admin">Admin (includes shutdown)</option></select></label>
+          </div>
+          <button id="enroll-controller-btn" class="connect-button" type="button">Enroll this controller on that PC</button>
+
+          <div class="group-toolbar">
+            <div><strong>Controllers enrolled on THIS PC:</strong> these devices can reach this PC without the shared password.</div>
+          </div>
+          <div id="enrolled-controllers-list" class="device-list"><div class="empty-devices">No controllers enrolled yet.</div></div>
+
+          <div class="group-toolbar">
+            <label class="select-all-control"><input id="require-enrolled-only" type="checkbox" /> Require enrolled controllers only on this PC (disables the shared password here)</label>
+          </div>
+        </section>
+
         <section id="saved-pcs" class="saved-pcs-view" data-tab-section="devices">
           <div class="device-flow-nav" aria-label="Device workflow"><span class="flow-label">Computer lab controls</span><button id="device-step-groups" class="flow-step active"><b>1</b> Choose group</button><button id="device-step-devices" class="flow-step"><b>2</b> Select PCs</button><button id="device-step-local" class="flow-step"><b>3</b> Manage rules</button><button id="device-step-rules" class="flow-step"><b>↗</b> Open rules</button></div>
           <div class="section-heading" data-device-step="groups"><div><button id="add-group" class="primary-action">+ Add Group</button><span class="eyebrow">Computer lab groups</span><h2>Choose a group</h2></div><div class="saved-pc-heading-actions"><button id="sync-saved-pcs" class="connect-button" type="button" title="Discover saved PCs, update changed IP addresses, and check their agents"><span>Sync PCs</span><span class="button-arrow">↻</span></button><button id="refresh-saved-pcs" class="secondary-button" type="button" title="Check which saved PCs are online"><span>Refresh</span><span class="button-arrow">↻</span></button><span id="saved-pc-count" class="scope-tag">0 groups</span></div></div>

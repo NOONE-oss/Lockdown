@@ -26,4 +26,16 @@ function normalizeDuration(value) {
   return Math.floor(minutes);
 }
 
-module.exports = { normalizeList, normalizeDuration, normalizeSite };
+function normalizeIpList(value) {
+  if (!Array.isArray(value)) throw new TypeError('Expected a list of IP addresses.');
+  const ipv4 = /^((25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(25[0-5]|2[0-4]\d|1?\d?\d)$/;
+  const cleaned = [...new Set(value
+    .filter((item) => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean))];
+  const invalid = cleaned.filter((ip) => !ipv4.test(ip));
+  if (invalid.length) throw new RangeError(`Not a valid IPv4 address: ${invalid[0]}`);
+  return cleaned;
+}
+
+module.exports = { normalizeList, normalizeDuration, normalizeSite, normalizeIpList };

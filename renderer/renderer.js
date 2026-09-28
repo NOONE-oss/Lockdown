@@ -100,12 +100,29 @@ const usageUpdated = document.getElementById('usage-updated');
 const dashboardOnline = document.getElementById('dashboard-online');
 const dashboardOffline = document.getElementById('dashboard-offline');
 const dashboardDeviceList = document.getElementById('dashboard-device-list');
+const setAgentPasswordBtn = document.getElementById('set-agent-password');
+const allowedControllersInput = document.getElementById('allowed-controllers-input');
+const saveAllowedControllersBtn = document.getElementById('save-allowed-controllers');
+const agentSecurityStatus = document.getElementById('agent-security-status');
+const generatePairingCodeBtn = document.getElementById('generate-pairing-code');
+const pairingCodeDisplay = document.getElementById('pairing-code-display');
+const cancelPairingBtn = document.getElementById('cancel-pairing');
+const enrollHostInput = document.getElementById('enroll-host-input');
+const enrollCodeInput = document.getElementById('enroll-code-input');
+const enrollLabelInput = document.getElementById('enroll-label-input');
+const enrollRoleInput = document.getElementById('enroll-role-input');
+const enrollControllerBtn = document.getElementById('enroll-controller-btn');
+const enrolledControllersList = document.getElementById('enrolled-controllers-list');
+const requireEnrolledOnlyCheckbox = document.getElementById('require-enrolled-only');
+let pairingCountdownTimer = null;
 let speedRefreshTimer;
 let discoveredDevices = [];
 let usageReadings = [];
 let networkGroups = [];
 let activeTab = 'overview';
 let agentSessionExpiresAt = 0;
+let cachedAgentPassword = null;
+const AGENT_SESSION_DURATION_MS = 2 * 60 * 1000; // matches the two-minute session described in the README
 let savedNetworkRefreshRunning = false;
 let selectedSavedKeys = new Set();
 let editingGroupId = null;
@@ -152,21 +169,50 @@ function applyTheme(theme) {
   }
 }
 
+// Returns the cached network password if the 2-minute session is still
+// valid, otherwise null. This does NOT prompt — callers that need to
+// guarantee a password is available should call requireAuthentication()
+// first, which prompts and throws if the user doesn't provide one.
 function agentSessionPassword() {
-  return 'no-password';
+  if (cachedAgentPassword && Date.now() < agentSessionExpiresAt) return cachedAgentPassword;
+  cachedAgentPassword = null;
+  return null;
 }
 
 async function unlockAgentSession() {
+  const entered = window.prompt('Enter the shared network password for this lab.\n\nThis is the same password that must be set on every lab PC (Network tab → Set network password).');
+  if (entered === null) return false; // user cancelled
+  if (entered.length < 12) {
+    showToast('Network password must be at least 12 characters.');
+    return false;
+  }
+  cachedAgentPassword = entered;
+  agentSessionExpiresAt = Date.now() + AGENT_SESSION_DURATION_MS;
+  updateAgentSessionStatus();
   return true;
 }
 
 function updateAgentSessionStatus() {
   if (!agentSessionStatus) return;
-  agentSessionStatus.textContent = 'Authenticated';
-  agentSessionStatus.classList.add('connected');
+  const active = Boolean(cachedAgentPassword) && Date.now() < agentSessionExpiresAt;
+  agentSessionStatus.textContent = active ? 'Authenticated' : 'Not authenticated';
+  agentSessionStatus.classList.toggle('connected', active);
 }
 
+// Ensures a password is available for this session before a remote command
+// is sent. Throws if the user cancels or enters an invalid password, which
+// stops the calling function before it does anything — callers don't need
+// to check a return value individually.
 async function requireAuthentication() {
+  if (agentSessionPassword()) {
+    updateAgentSessionStatus();
+    return true;
+  }
+  const unlocked = await unlockAgentSession();
+  if (!unlocked) {
+    updateAgentSessionStatus();
+    throw new Error('Network password required to control other devices.');
+  }
   return true;
 }
 
@@ -438,6 +484,7 @@ async function runSavedDeviceTask(ip, command) {
 }
 
 async function runBulkCommand(devices, command, message) {
+  await requireAuthentication();
   if (command === 'shutdown') devices = devices.filter((device) => !isCurrentDevice(device));
   if (!devices.length) {
     showToast('No remote PCs are selected for shutdown');
@@ -756,6 +803,7 @@ async function deleteSelectedGroup() {
 }
 
 async function sendGroup(command, payload, message) {
+  await requireAuthentication();
   const devices = selectedDevices();
   const password = agentSessionPassword();
   if (!devices.length) {
@@ -1085,3 +1133,158 @@ refreshSavedNetwork();
 setInterval(refreshLockStatus, 1000);
 setInterval(refreshSavedNetwork, 30000);
 updateAgentSessionStatus();
+refreshAgentSecurityStatus();
+refreshPairingDisplay();
+
+async function refreshAgentSecurityStatus() {
+  if (!window.api?.getAgentSecurityStatus) return;
+  const status = await window.api.getAgentSecurityStatus();
+  if (allowedControllersInput) allowedControllersInput.value = (status.allowedControllerIps || []).join(', ');
+  if (agentSecurityStatus) {
+    const passwordNote = status.passwordConfigured ? 'Password set.' : 'No password set yet — this PC will reject every remote command.';
+    const ipNote = status.allowedControllerIps?.length
+      ? `${status.allowedControllerIps.length} controller IP${status.allowedControllerIps.length === 1 ? '' : 's'} allowed.`
+      : 'No controller IPs allowed yet — this PC is not reachable over the LAN.';
+    agentSecurityStatus.textContent = `${passwordNote} ${ipNote}`;
+  }
+  if (requireEnrolledOnlyCheckbox) requireEnrolledOnlyCheckbox.checked = status.allowLegacyPassword === false;
+  renderEnrolledControllers();
+}
+
+function formatPairingCountdown(expiresAt) {
+  const remainingMs = Math.max(0, expiresAt - Date.now());
+  const minutes = Math.floor(remainingMs / 60000);
+  const seconds = Math.floor((remainingMs % 60000) / 1000);
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+async function refreshPairingDisplay() {
+  if (!window.api?.getPairingStatus) return;
+  const status = await window.api.getPairingStatus();
+  clearInterval(pairingCountdownTimer);
+  if (!status.active) {
+    if (pairingCodeDisplay) pairingCodeDisplay.textContent = 'No pairing code active.';
+    if (cancelPairingBtn) cancelPairingBtn.hidden = true;
+    return;
+  }
+  if (cancelPairingBtn) cancelPairingBtn.hidden = false;
+  const render = () => {
+    if (!pairingCodeDisplay) return;
+    if (Date.now() >= status.expiresAt) {
+      pairingCodeDisplay.textContent = 'Pairing code expired.';
+      if (cancelPairingBtn) cancelPairingBtn.hidden = true;
+      clearInterval(pairingCountdownTimer);
+      return;
+    }
+    pairingCodeDisplay.textContent = `Code: ${status.code} — expires in ${formatPairingCountdown(status.expiresAt)}`;
+  };
+  render();
+  pairingCountdownTimer = setInterval(render, 1000);
+}
+
+async function renderEnrolledControllers() {
+  if (!enrolledControllersList || !window.api?.getEnrolledControllers) return;
+  const controllers = await window.api.getEnrolledControllers();
+  if (!controllers.length) {
+    enrolledControllersList.innerHTML = '<div class="empty-devices">No controllers enrolled yet.</div>';
+    return;
+  }
+  enrolledControllersList.innerHTML = controllers.map((controller) => `
+    <div class="device-row">
+      <div><strong>${controller.label}</strong><span> — ${controller.role} — enrolled ${new Date(controller.enrolledAt).toLocaleString()}</span></div>
+      <button type="button" class="secondary-button" data-remove-controller="${controller.id}">Remove</button>
+    </div>
+  `).join('');
+  enrolledControllersList.querySelectorAll('[data-remove-controller]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const label = button.closest('.device-row').querySelector('strong').textContent;
+      if (!confirm(`Remove "${label}"? It will need to be re-enrolled to reach this PC again.`)) return;
+      await window.api.removeEnrolledController(button.dataset.removeController);
+      showToast('Controller removed.');
+      renderEnrolledControllers();
+    });
+  });
+}
+
+async function requireLocalConfirm(message) {
+  if (!confirm(message)) throw new Error('Cancelled');
+}
+
+generatePairingCodeBtn?.addEventListener('click', async () => {
+  await window.api.generatePairingCode();
+  showToast('Pairing code generated — read it to whoever is enrolling.');
+  refreshPairingDisplay();
+});
+
+cancelPairingBtn?.addEventListener('click', async () => {
+  await window.api.cancelPairing();
+  refreshPairingDisplay();
+});
+
+enrollControllerBtn?.addEventListener('click', async () => {
+  const host = (enrollHostInput?.value || '').trim();
+  const code = (enrollCodeInput?.value || '').trim();
+  const label = (enrollLabelInput?.value || '').trim();
+  const role = enrollRoleInput?.value || 'operator';
+  if (!host || !code) {
+    showToast('Enter the target PC address and its pairing code.');
+    return;
+  }
+  try {
+    const result = await window.api.enrollController(host, code, label, role);
+    showToast(`Enrolled as "${result.label}" with the ${result.role} role.`);
+    enrollCodeInput.value = '';
+  } catch (error) {
+    showToast(error.message || 'Enrollment failed.');
+  }
+});
+
+requireEnrolledOnlyCheckbox?.addEventListener('change', async () => {
+  const enabled = requireEnrolledOnlyCheckbox.checked;
+  if (enabled) {
+    try {
+      await requireLocalConfirm('This will stop this PC from accepting the shared network password at all — only enrolled controllers will be able to reach it. Continue?');
+    } catch (_) {
+      requireEnrolledOnlyCheckbox.checked = false;
+      return;
+    }
+  }
+  await window.api.setAllowLegacyPassword(!enabled);
+  showToast(enabled ? 'This PC now requires enrolled controllers.' : 'Shared password re-enabled on this PC.');
+});
+
+setAgentPasswordBtn?.addEventListener('click', async () => {
+  const entered = window.prompt('Set the network password for THIS PC.\n\nSet the exact same password on every other lab PC — controllers authenticate with this shared password.');
+  if (entered === null) return;
+  if (entered.length < 12) {
+    showToast('Network password must be at least 12 characters.');
+    return;
+  }
+  const confirmEntry = window.prompt('Re-enter the password to confirm:');
+  if (confirmEntry !== entered) {
+    showToast('Passwords did not match — nothing was changed.');
+    return;
+  }
+  try {
+    await window.api.setAgentPassword(entered);
+    showToast('Network password set for this PC.');
+    refreshAgentSecurityStatus();
+  } catch (error) {
+    showToast(error.message || 'Could not set the network password.');
+  }
+});
+
+saveAllowedControllersBtn?.addEventListener('click', async () => {
+  const ips = (allowedControllersInput?.value || '').split(/[\n,]/).map((ip) => ip.trim()).filter(Boolean);
+  try {
+    const result = await window.api.updateAllowedControllers(ips);
+    if (result.firewall && result.firewall.supported === false && result.firewall.error) {
+      showToast(`Saved, but the firewall rule could not be updated: ${result.firewall.error}`);
+    } else {
+      showToast(ips.length ? `${ips.length} controller IP${ips.length === 1 ? '' : 's'} allowed.` : 'Cleared — this PC is loopback-only now.');
+    }
+    refreshAgentSecurityStatus();
+  } catch (error) {
+    showToast(error.message || 'Could not save the allowed controller list.');
+  }
+});
