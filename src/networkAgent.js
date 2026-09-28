@@ -224,7 +224,7 @@ async function startNetworkAgent({ getData, getNetworkGroups, updateSites, updat
   const certificate = await loadCertificate(certificateDirectory);
   server = https.createServer(certificate, async (request, response) => {
     if (request.method === 'GET' && request.url === '/health') {
-      sendJson(response, 200, { ok: true, name: 'Lockdown Blocker Agent' });
+      sendJson(response, 200, { ok: true, name: 'Lockdown Blocker Agent', hostname: os.hostname() });
       return;
     }
 

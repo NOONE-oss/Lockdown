@@ -1,4 +1,5 @@
 const { execFile } = require('child_process');
+const https = require('https');
 const dns = require('dns').promises;
 const os = require('os');
 
@@ -99,7 +100,42 @@ async function resolveName(ip) {
   return null;
 }
 
-async function discoverNetwork() {
+// Asks a device whether it is running the Lockdown agent and, if so, what it
+// calls itself. Far more reliable than Windows name lookups (ping -a, NetBIOS,
+// reverse DNS), which are all blocked by default on Windows 11. Certificates
+// are self-signed, so they are not verified here; the reply is only used to
+// label the device, never to authenticate anything.
+function probeAgent(ip, port, timeoutMs = 900) {
+  return new Promise((resolve) => {
+    const request = https.request({ hostname: ip, port, path: '/health', method: 'GET', rejectUnauthorized: false, timeout: timeoutMs }, (response) => {
+      let text = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => {
+        text += chunk;
+        if (text.length > 4096) request.destroy();
+      });
+      response.on('end', () => {
+        try {
+          const body = JSON.parse(text);
+          if (body && body.ok && body.name === 'Lockdown Blocker Agent') {
+            const hostname = typeof body.hostname === 'string' ? body.hostname.replace(/[^\w.\- ]/g, '').slice(0, 63) : '';
+            resolve({ hostname: hostname || null });
+            return;
+          }
+        } catch (_) {
+          // Not our agent; fall through.
+        }
+        resolve(null);
+      });
+    });
+    request.on('timeout', () => request.destroy());
+    request.on('error', () => resolve(null));
+    request.on('close', () => resolve(null));
+    request.end();
+  });
+}
+
+async function discoverNetwork({ port = 47821 } = {}) {
   const local = localAddresses();
   if (!local.length) return [];
   let probedAddresses = [];
@@ -138,15 +174,19 @@ async function discoverNetwork() {
   for (const ip of probedAddresses) addresses.add(ip);
   const devices = await Promise.all([...addresses].map(async (ip) => {
     const isLocal = local.some((item) => item.address === ip);
-    const name = isLocal ? os.hostname() : await resolveName(ip);
+    // Devices running Lockdown report their own name; only fall back to the
+    // slower Windows name lookups for devices that don't answer.
+    const agent = isLocal || !onlineAddresses.has(ip) ? null : await probeAgent(ip, port);
+    const name = isLocal ? os.hostname() : (agent?.hostname || await resolveName(ip));
     return {
       ip,
       name,
       nameAvailable: Boolean(name),
+      agent: isLocal ? true : Boolean(agent),
       mac: macs.get(ip) || (isLocal ? local.find((item) => item.address === ip)?.mac || 'local' : 'Detected on LAN'),
       local: isLocal,
       online: onlineAddresses.has(ip),
-      type: inferDeviceType(name, isLocal)
+      type: agent ? 'pc' : inferDeviceType(name, isLocal)
     };
   }));
   const uniqueDevices = [];
@@ -161,4 +201,4 @@ async function discoverNetwork() {
   return uniqueDevices.sort((a, b) => Number(b.online) - Number(a.online) || a.ip.localeCompare(b.ip, undefined, { numeric: true }));
 }
 
-module.exports = { discoverNetwork };
+module.exports = { discoverNetwork, probeAgent };

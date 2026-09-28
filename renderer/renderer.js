@@ -331,7 +331,7 @@ function renderDevices(devices) {
   }
   deviceList.innerHTML = devices.map((device) => {
     const displayName = device.nameAvailable ? escapeHtml(device.name) : 'Name unavailable';
-    const nameNote = device.nameAvailable ? 'PC name' : 'Enable Network Discovery on this PC';
+    const nameNote = device.agent ? 'Lockdown agent' : (device.nameAvailable ? 'PC name' : 'No Lockdown agent found');
     return `<div class="device-row ${device.online === false ? 'offline-device' : ''}"><input type="checkbox" data-device-ip="${escapeHtml(device.ip)}"><span class="device-state ${device.online !== false ? 'local' : ''}"></span><span class="device-details"><strong>${displayName}<em>${nameNote} · ${escapeHtml(device.type || 'unknown')} · ${device.online === false ? 'Offline' : 'Online'}</em></strong><small>IP ${escapeHtml(device.ip)} · MAC ${escapeHtml(device.mac || 'unavailable')}${device.local ? ' · This computer' : ''}</small></span></div>`;
   }).join('');
 }

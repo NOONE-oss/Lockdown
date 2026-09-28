@@ -635,7 +635,7 @@ ipcMain.handle('remote-command', (_evt, { host, password, command, payload, role
   remoteCommand(host, password || 'no-password', command, payload, role)
 );
 
-ipcMain.handle('discover-network', () => networkDiscovery.discoverNetwork());
+ipcMain.handle('discover-network', () => networkDiscovery.discoverNetwork({ port: store.load().network?.port || networkAgent.DEFAULT_PORT }));
 
 ipcMain.handle('network-speed-test', (event) => networkSpeedTest.measureNetworkSpeed({
   onStage: (stage) => event.sender.send('network-speed-stage', stage)
